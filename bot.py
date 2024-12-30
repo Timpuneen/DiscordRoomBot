@@ -77,13 +77,10 @@ async def on_voice_state_update(member, before, after):
 
     # Условие для удаления категории, если голосовые каналы пустые
     if before.channel:
-        print("1")
         for user_id, category_manager in list(categories_data.items()):  # Проверяем все категории
             if before.channel in category_manager.category.voice_channels:  # Если канал принадлежит категории
-                print("2")
                 # Проверяем, остались ли участники в голосовых каналах
                 if all(len(vc.members) == 0 for vc in category_manager.category.voice_channels):
-                    print("3")
                     try:
                         # Удаляем каналы и категорию
                         for channel in category_manager.category.channels:
