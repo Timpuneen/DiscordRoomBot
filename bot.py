@@ -47,13 +47,13 @@ async def on_voice_state_update(member, before, after):
             await category_manager.category.delete()
             del categories_data[member.id]
 
-        def_role = discord.utils.get(guild.roles, name="ARMATURA") 
+        #def_role = discord.utils.get(guild.roles, name="ARMATURA") 
 
         category = await guild.create_category_channel(
             name=f"Приватная комната {member.display_name}",
             overwrites={
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                def_role: discord.PermissionOverwrite(view_channel=False),
+                #def_role: discord.PermissionOverwrite(view_channel=False),
                 member: discord.PermissionOverwrite(view_channel=True),
             },
             position=0
@@ -75,22 +75,28 @@ async def on_voice_state_update(member, before, after):
         # Отправка меню управления в текстовый канал
         await send_control_menu(text_channel, member)
 
+    # Условие для удаления категории, если голосовые каналы пустые
     if before.channel:
-        category_manager = categories_data.get(member.id)
-        if category_manager and category_manager.voice_channel == before.channel:
-            # Проверяем, остался ли кто-либо в голосовом канале
-            if len(category_manager.voice_channel.members) == 0:
-                try:
-                    for channel in category_manager.category.channels:
-                        if channel:
-                            await channel.delete()
+        print("1")
+        for user_id, category_manager in list(categories_data.items()):  # Проверяем все категории
+            if before.channel in category_manager.category.voice_channels:  # Если канал принадлежит категории
+                print("2")
+                # Проверяем, остались ли участники в голосовых каналах
+                if all(len(vc.members) == 0 for vc in category_manager.category.voice_channels):
+                    print("3")
+                    try:
+                        # Удаляем каналы и категорию
+                        for channel in category_manager.category.channels:
+                            if channel:
+                                await channel.delete()
 
-                    if category_manager.category:
-                        await category_manager.category.delete()
+                        if category_manager.category:
+                            await category_manager.category.delete()
 
-                    del categories_data[member.id]
-                except discord.errors.NotFound:
-                    print("tip")
+                        del categories_data[user_id]
+                    except discord.errors.NotFound:
+                        print("tip")
+
 
 
 async def send_control_menu(channel, creator):
@@ -149,36 +155,31 @@ async def send_control_menu(channel, creator):
                 await interaction.response.send_message("Никого нет в голосовом канале.", ephemeral=True)
                 return
 
-            # Составляем список участников с номерами
-            member_list = [f"{index + 1} - {member.display_name}" for index, member in enumerate(members)]
-            member_numbers = {str(index + 1): member.id for index, member in enumerate(members)}
+            # Составляем список участников с кнопками для исключения
+            buttons = []
+            for member in members:
+                button = discord.ui.Button(label=f"Исключить {member.display_name}", style=discord.ButtonStyle.danger)
+                
+                async def kick_callback(interaction: discord.Interaction, member=member):
+                    # Исключаем участника из канала
+                    await category_manager.voice_channel.set_permissions(member, view_channel=False, connect=False)
+                    await member.move_to(None)  # Отключаем его от голосового канала
+                    await interaction.response.send_message(f"Участник {member.display_name} исключен из голосового канала.", ephemeral=True)
+                
+                button.callback = kick_callback
+                buttons.append(button)
 
-            # Отправляем список участников с номерами
+            # Создаем View с кнопками для каждого участника
+            view = discord.ui.View()
+            for btn in buttons:
+                view.add_item(btn)
+
             await interaction.response.send_message(
-                f"Выберите участника для исключения, отправив его номер:\n" + "\n".join(member_list),
-                ephemeral=True
+                "Выберите участника для исключения, нажав на его кнопку:",
+                ephemeral=True,
+                view=view
             )
 
-            def check(m):
-                return m.author == interaction.user and m.channel == channel
-
-            # Ожидаем ввод номера участника
-            msg = await bot.wait_for("message", check=check)
-
-            # Проверяем, что введен правильный номер
-            if msg.content.isdigit() and msg.content in member_numbers:
-                member_id = member_numbers[msg.content]
-                member_to_kick = discord.utils.get(self.guild.members, id=member_id)
-
-                if member_to_kick:
-                    # Исключаем участника из канала
-                    await category_manager.voice_channel.set_permissions(member_to_kick, view_channel=False, connect=False)
-                    await member_to_kick.move_to(None)  # Отключаем его от голосового канала
-                    await interaction.followup.send(f"Участник {member_to_kick.display_name} исключен из голосового канала.", ephemeral=True)
-                else:
-                    await interaction.followup.send("Не удалось найти участника для исключения.", ephemeral=True)
-            else:
-                await interaction.followup.send("Номер участника неверен.", ephemeral=True)
 
         @discord.ui.button(label="Открыть голосовой канал", style=discord.ButtonStyle.success)
         async def open_voice_channel(self, interaction: discord.Interaction, button: Button):
